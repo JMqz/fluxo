@@ -176,7 +176,29 @@
     .hist td:nth-child(4){grid-column:2;text-align:left!important;padding-top:8px}
     .hist td:nth-child(4) .btn{min-height:40px}
     .toast{max-width:calc(100% - 32px);text-align:center}
-  }  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+    /* tabelas largas (Pedidos, Estoque, Gestão) viram linhas em grade: sem rolagem lateral, ações descem para a linha de baixo */
+    .tg tr{display:grid;column-gap:10px;align-items:start;padding:10px 8px;border-bottom:1px solid var(--paper-2)}
+    .tg tr:last-child{border-bottom:0}
+    .tg tr:has(th){padding:7px 8px;background:var(--paper);border-radius:var(--r-sm);border-bottom:0}
+    .tg td,.tg th{padding:0;border:0;background:none;border-radius:0}
+    .tg th:empty{display:none}
+    .tg td:first-child{width:auto}
+    .t-abertos tr{grid-template-columns:minmax(0,1fr) 84px 76px}
+    .stock tr{grid-template-columns:minmax(0,1fr) 34px 34px 74px}
+    .t-cli tr{grid-template-columns:minmax(0,1fr) 56px 84px}
+    .t-mot tr{grid-template-columns:minmax(0,1fr) 64px 42px 72px}
+    .t-bairros tr{grid-template-columns:minmax(0,1fr) 76px 84px}
+    .t-bairros th:empty{display:block}
+    .roadmap tr{grid-template-columns:minmax(0,1fr) 112px}
+    .t-abertos td:nth-child(4),.stock td:nth-child(5),.t-cli td:nth-child(4),.t-mot td:nth-child(5),.roadmap td:nth-child(3){grid-column:1/-1;text-align:left!important;padding-top:8px}
+    .roadmap th:nth-child(3){display:none}
+    .t-movs tr{grid-template-columns:minmax(0,1fr) 64px 56px}
+    .t-movs :is(td,th):nth-child(2){grid-row:1;grid-column:1}
+    .t-movs :is(td,th):nth-child(3){grid-row:1;grid-column:2}
+    .t-movs :is(td,th):nth-child(4){grid-row:1;grid-column:3}
+    .t-movs td:nth-child(1){grid-row:2;grid-column:1/-1;padding-top:4px}
+    .t-movs td:nth-child(5){grid-row:3;grid-column:1/-1}
+    .t-movs th:nth-child(1),.t-movs th:nth-child(5){display:none}  }  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
@@ -412,7 +434,7 @@ function pedidos(){
     </div>
     <div class="panel">
       <h2 style="margin-top:0">Em aberto</h2>
-      ${ativos.length?`<table class="orders"><tr><th>Pedido</th><th style="text-align:right">Total</th><th>Status</th><th></th></tr>
+      ${ativos.length?`<table class="orders tg t-abertos"><tr><th>Pedido</th><th style="text-align:right">Total</th><th>Status</th><th></th></tr>
       ${ativos.map(p=>`<tr><td><b>${esc(p.cliente)}</b> <span class="muted">#${p.id}</span>${p.prev?` <span class="tag ${p.prev<HOJE?'falha':''}">${p.prev.slice(8)}/${p.prev.slice(5,7)} · ${p.janela||''}</span>`:''}<br><span class="muted">${p.itens.map(i=>`${i.q}× ${byId(S.produtos,i.p)?.nome.split(' ')[0]}`).join(', ')}</span></td><td class="num">${brl(total(p))}</td><td class="nw"><span class="tag ${p.status}">${p.status}</span></td>
       <td class="nw" style="text-align:right">${p.status==='novo'?`<button class="btn sm" onclick="separar(${p.id})">Separar</button>`:`<span class="muted">aguarda rota</span>`}</td></tr>`).join('')}</table>`:'<p class="empty">Nenhum pedido em aberto.</p>'}
       <div class="note">"Separar" baixa o estoque e coloca o pedido na fila da rota.</div>
@@ -483,7 +505,7 @@ function estoque(){
   const hist=[...(S.movimentos||[])].reverse().slice(0,12);
   return `<h1>Estoque</h1><p class="sub">Registre entradas de produção, saídas avulsas e ajustes. A separação de pedidos baixa o estoque sozinha.</p>
   <div class="cols wide">
-    <div class="panel"><table class="stock"><tr><th>Produto</th><th class="nw">Qtd</th><th class="nw">Mín.</th><th class="nw">Preço</th><th></th></tr>
+    <div class="panel"><table class="stock tg"><tr><th>Produto</th><th class="nw">Qtd</th><th class="nw">Mín.</th><th class="nw">Preço</th><th></th></tr>
     ${S.produtos.map(p=>`<tr><td><b>${esc(p.nome)}</b><br><span class="muted">${esc(p.sku)}</span></td><td class="nw ${p.qtd<=p.min?'low':''}">${p.qtd}</td><td class="muted nw">${p.min}</td><td class="nw">${brl(p.preco)}</td>
     <td class="nw" style="text-align:right"><button class="btn ghost sm" onclick="prepMov(${p.id})">Movimentar</button> <button class="btn ghost sm" onclick="S.editProd=${p.id};render()">Editar</button></td></tr>`).join('')}</table></div>
     <div>
@@ -503,7 +525,7 @@ function estoque(){
     </div>
   </div>
   <h2>Movimentações recentes</h2>
-  <div class="panel">${hist.length?`<table><tr><th>Quando</th><th>Produto</th><th>Tipo</th><th class="nw" style="text-align:right">Qtd</th><th>Motivo</th></tr>
+  <div class="panel">${hist.length?`<table class="tg t-movs"><tr><th>Quando</th><th>Produto</th><th>Tipo</th><th class="nw" style="text-align:right">Qtd</th><th>Motivo</th></tr>
   ${hist.map(m=>`<tr><td class="muted nw">${m.ts.replace('T',' ')}</td><td>${esc(byId(S.produtos,m.p)?.nome||'—')}</td><td><span class="tag ${m.tipo==='entrada'?'separado':m.tipo==='saida'?'rota':'novo'}">${m.tipo}</span></td><td class="num">${m.tipo==='saida'?'−':m.tipo==='entrada'?'+':'='}${m.q}${m.dif!=null?`<br><span class="muted ${m.dif?'low':''}">${m.dif?`dif. ${m.dif>0?'+':'−'}${Math.abs(m.dif)}`:'sem dif.'}</span>`:''}</td><td class="muted">${esc(m.motivo||'')}</td></tr>`).join('')}</table>`:'<p class="empty">Nenhum movimento registrado.</p>'}</div>`;
 }
 function prepMov(id){S.movProd=id;render();document.getElementById('mv-q')?.focus()}
@@ -808,11 +830,11 @@ function gestao(){
   </div>
   <div class="cols" style="margin-top:22px">
     <div class="panel"><h2 style="margin-top:0">Clientes</h2>
-      <table><tr><th>Cliente</th><th class="nw">Pedidos</th><th class="nw" style="text-align:right">Comprado</th><th></th></tr>
+      <table class="tg t-cli"><tr><th>Cliente</th><th class="nw">Pedidos</th><th class="nw" style="text-align:right">Comprado</th><th></th></tr>
       ${clientes.map(([n,c])=>`<tr><td>${esc(n)}<br><span class="muted">último: ${c.ult.slice(8,10)}/${c.ult.slice(5,7)}</span></td><td class="nw">${c.n}</td><td class="num">${brl(c.v)}</td><td class="nw" style="text-align:right">${c.tel?`<a class="btn ghost sm" target="_blank" href="${wa(c.tel,`Olá, ${n}! Tudo bem? Passando para saber se precisa de reposição essa semana.`)}">WhatsApp</a>`:''}</td></tr>`).join('')}</table></div>
     <div>
       <div class="panel"><h2 style="margin-top:0">Motoristas</h2>
-        <table><tr><th>Nome</th><th class="nw">Entregues</th><th class="nw">Falhas</th><th class="nw">R$/parada</th><th></th></tr>
+        <table class="tg t-mot"><tr><th>Nome</th><th class="nw">Entregues</th><th class="nw">Falhas</th><th class="nw">R$/parada</th><th></th></tr>
         ${porMot.map(x=>`<tr><td>${esc(x.m)}</td><td class="nw">${x.ent}</td><td class="nw ${x.fal?'low':''}">${x.fal}</td><td class="nw"><input type="number" step="0.5" value="${S.custoParada[x.m]||0}" style="width:70px;padding:4px 6px" onchange="S.custoParada[${esc(JSON.stringify(x.m))}]=+this.value;render()"></td><td class="nw" style="text-align:right"><button class="btn ghost sm" onclick="removerMotorista(${esc(JSON.stringify(x.m))})">Remover</button></td></tr>`).join('')}</table>
         <div class="row" style="margin-top:12px;grid-template-columns:1fr auto;align-items:end"><div class="field"><label>Novo motorista (nome e veículo)</label><input id="nm" placeholder="Ex.: Paulo (bicicleta)"></div><button class="btn" onclick="addMotorista()">Adicionar</button></div>
       </div>
@@ -829,7 +851,7 @@ function gestao(){
   </div>
   <div class="cols" style="margin-top:22px">
     <div class="panel"><h2 style="margin-top:0">Área de cobertura e taxa de entrega</h2>
-      <table><tr><th>Bairro / região</th><th class="nw" style="text-align:right">Taxa</th><th></th></tr>
+      <table class="tg t-bairros"><tr><th>Bairro / região</th><th class="nw" style="text-align:right">Taxa</th><th></th></tr>
       ${S.bairros.map((b,i)=>`<tr><td>${esc(b.n)}</td><td class="num">${brl(b.taxa)}</td><td class="nw" style="text-align:right"><button class="btn ghost sm" onclick="S.bairros.splice(${i},1);render()">Remover</button></td></tr>`).join('')}</table>
       <div class="row" style="margin-top:12px;grid-template-columns:2fr 1fr auto;align-items:end"><div class="field"><label>Novo bairro</label><input id="nb-n" placeholder="Ex.: Vila Cristina"></div><div class="field"><label>Taxa (R$)</label><input id="nb-t" type="number" step="0.5" value="6"></div><button class="btn" onclick="addBairro()">Adicionar</button></div>
       <div class="note">Planejado: cobertura por raio no mapa e taxa dinâmica por distância, usando a geocodificação real dos endereços.</div>
@@ -855,7 +877,7 @@ function gestao(){
     </div>
   </div>
   <h2>Roadmap</h2>
-  <div class="panel"><table class="roadmap"><tr><th>Função</th><th>Status</th><th>O que falta</th></tr>
+  <div class="panel"><table class="roadmap tg"><tr><th>Função</th><th>Status</th><th>O que falta</th></tr>
     ${[
       ['Pedido por WhatsApp interpretado por IA','ok','Roda no runtime do Claude; hospedado fora dele, precisa de um backend com a chave da API'],
       ['Roteirização e abertura no Google Maps','ok','—'],
