@@ -276,7 +276,11 @@ const MODO_NOTA = ()=>MODO==='demo'?'Na demonstração, os números vêm dos ped
 const iso = (d,n=16)=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,n);
 const agora = ()=>iso(new Date());
 const byId = (arr,id)=>arr.find(x=>x.id===id);
-const subtotal = p=>p.itens.reduce((s,i)=>s+i.q*(byId(S.produtos,i.p)?.preco||0),0);
+// o preço fica gravado no item quando o pedido é criado: editar ou remover o produto não muda pedidos antigos nem um Pix já enviado
+const precoItem = i=>i.preco??byId(S.produtos,i.p)?.preco??0;
+const subtotal = p=>p.itens.reduce((s,i)=>s+i.q*precoItem(i),0);
+// dados salvos antes dessa mudança: grava o preço atual nos itens que ainda não têm
+function fixarPrecos(){S.pedidos.forEach(p=>p.itens.forEach(i=>{if(i.preco==null){const pr=byId(S.produtos,i.p);if(pr)i.preco=pr.preco}}))}
 const total = p=>subtotal(p)+(p.frete||0);
 const rastreioUrl = p=>`https://fluxo.app/r/FLX${p.id}`; // domínio planejado
 // toda troca de status passa por aqui e fica em p.eventos [{s,ts}] (inclusive idas e voltas, como reagendamento)
@@ -311,6 +315,7 @@ async function carregar(zerar){
   travado=false;
   S=MODO==='real'?estadoVazio():estadoDemo(); nextId=MODO==='real'?1:106; Object.assign(BASE,BASE0);
   HOJE=MODO==='real'?iso(new Date(),10):HOJE_DEMO;
+  fixarPrecos();
   if(zerar) return;
   try{
     const v=await DB.get(chaveEstado());
@@ -320,6 +325,7 @@ async function carregar(zerar){
     if(d.nextId) nextId=d.nextId;
     if(d.BASE) Object.assign(BASE,d.BASE);
     S.view='painel'; S.acao=null; S.editProd=null;
+    fixarPrecos(); fecharRotaSeConcluida();
   }catch(e){
     if(MODO==='real'){travado=true; toast('Os dados de uso real não puderam ser lidos. Nada será gravado; recarregue a página.')}
     else toast('Os dados salvos não puderam ser lidos. Voltando aos dados de exemplo.');
@@ -379,9 +385,10 @@ function flowStrip(){
 
 function painel(){
   const hoje = S.pedidos.filter(p=>p.criado.startsWith(HOJE));
-  const receber = S.pedidos.filter(p=>!p.pago && p.status!=='falha').reduce((s,p)=>s+total(p),0);
+  const abertos = S.pedidos.filter(p=>!p.pago && p.status!=='falha'), receber = abertos.reduce((s,p)=>s+total(p),0);
   const baixo = S.produtos.filter(p=>p.qtd<=p.min);
-  return `<h1>Bom dia. ${hoje.length} pedidos hoje, ${S.pedidos.filter(p=>p.status==='separado').length} prontos para sair.</h1>
+  const h = new Date().getHours(), saudacao = h<12?'Bom dia':h<18?'Boa tarde':'Boa noite';
+  return `<h1>${saudacao}. ${hoje.length} pedidos hoje, ${S.pedidos.filter(p=>p.status==='separado').length} prontos para sair.</h1>
   <p class="sub">Do pedido à entrega em uma tela: separação, rota, aviso ao cliente e cobrança.</p>
   ${MODO==='real'&&!S.produtos.length?`<div class="note" style="margin:0 0 22px">Para começar o uso real: cadastre os produtos em <a href="#" onclick="go('estoque');return false">Estoque</a> e os motoristas, bairros e a chave Pix em <a href="#" onclick="go('gestao');return false">Gestão</a>.</div>`:''}
   ${flowStrip()}
@@ -389,7 +396,7 @@ function painel(){
     <div class="panel">
       <h2 style="margin-top:0">A receber</h2>
       <div style="font-family:var(--fd);font-size:34px;color:var(--navy);line-height:1.1;margin-top:6px">${brl(receber)}</div>
-      <p class="muted">${S.pedidos.filter(p=>!p.pago).length} pedidos sem pagamento confirmado. Gere o Pix em <a href="#" onclick="go('pix');return false">Cobranças</a>.</p>
+      <p class="muted">${abertos.length} ${abertos.length===1?'pedido':'pedidos'} sem pagamento confirmado. Gere o Pix em <a href="#" onclick="go('pix');return false">Cobranças</a>.</p>
       <h2>Estoque baixo</h2>
       ${baixo.length?`<table>${baixo.map(p=>`<tr><td>${esc(p.nome)}</td><td class="low nw">${p.qtd} un</td><td class="muted nw">mín. ${p.min}</td></tr>`).join('')}</table>`:'<p class="muted">Tudo acima do mínimo.</p>'}
       <h2>Últimos pedidos</h2>
@@ -446,7 +453,7 @@ function addItem(p,q){document.getElementById('itens').insertAdjacentHTML('befor
 function criarPedido(){
   const cliente=document.getElementById('f-cli').value.trim(), tel=document.getElementById('f-tel').value.replace(/\D/g,''), end=document.getElementById('f-end').value.trim();
   const bairro=document.getElementById('f-bairro').value, frete=S.bairros.find(b=>b.n===bairro)?.taxa||0, prev=document.getElementById('f-prev').value, janela=document.getElementById('f-janela').value;
-  const itens=[...document.querySelectorAll('#itens .row3')].map(r=>({p:+r.querySelector('.it-p').value,q:+r.querySelector('.it-q').value})).filter(i=>i.q>0&&byId(S.produtos,i.p));
+  const itens=[...document.querySelectorAll('#itens .row3')].map(r=>({p:+r.querySelector('.it-p').value,q:+r.querySelector('.it-q').value})).filter(i=>i.q>0&&byId(S.produtos,i.p)).map(i=>({...i,preco:byId(S.produtos,i.p).preco}));
   if(!S.produtos.length){toast('Cadastre os produtos em Estoque antes do primeiro pedido');return}
   if(!cliente||!end||!itens.length){toast('Preencha cliente, endereço e ao menos um item');return}
   const mapa=coordDoMapa(document.getElementById('f-mapa').value);
@@ -480,7 +487,9 @@ function lerMapa(){
 }
 function separar(id){
   const p=byId(S.pedidos,id);
-  for(const i of p.itens){const pr=byId(S.produtos,i.p); if(pr.qtd<i.q){toast(`Estoque insuficiente: ${pr.nome}`);return}}
+  // soma por produto: o mesmo produto em duas linhas não pode passar na conferência e deixar o saldo negativo
+  const pede={}; p.itens.forEach(i=>pede[i.p]=(pede[i.p]||0)+i.q);
+  for(const [id,q] of Object.entries(pede)){const pr=byId(S.produtos,+id); if(pr.qtd<q){toast(`Estoque insuficiente: ${pr.nome}`);return}}
   p.itens.forEach(i=>{byId(S.produtos,i.p).qtd-=i.q;mov(i.p,'saida',i.q,`Pedido #${p.id}`)}); mudarStatus(p,'separado'); notificar(p,'Pedido separado'); toast(`Pedido ${id} separado`); render();
 }
 async function interpretar(){
@@ -490,7 +499,7 @@ async function interpretar(){
 Extraia e responda SOMENTE um JSON, sem markdown: {"cliente":string,"telefone":string ou "","endereco":string,"itens":[{"p":id,"q":inteiro}]}. Mapeie os produtos para o id mais próximo do catálogo.
 Mensagem: """${msg}"""`;
   try{
-    const data=await claude(prompt);
+    const data=await chamarIA(prompt);
     const j=JSON.parse(data.replace(/```json|```/g,'').trim());
     document.getElementById('f-cli').value=j.cliente||''; document.getElementById('f-tel').value=(j.telefone||'').replace(/\D/g,''); document.getElementById('f-end').value=j.endereco||'';
     document.getElementById('itens').innerHTML=''; (j.itens||[]).forEach(i=>addItem(i.p,i.q)); if(!j.itens?.length) addItem();
@@ -564,13 +573,13 @@ function rotas(){
       ${r?`<h2 style="margin-top:0">Rota de hoje · ${esc(r.motorista)}</h2>
         <ol class="stops">${r.paradas.map((id,i)=>{const p=byId(S.pedidos,id);return `<li class="${p.status==='entregue'?'done':p.status==='falha'?'fail':''}"><span class="idx">${i+1}</span><div>${esc(p.cliente)}<br><span class="muted">${esc(p.end)} · ${brl(total(p))}${p.pago?'':' · a receber'}</span></div><span class="tag ${p.status}">${p.status}</span></li>`}).join('')}</ol>
         <div class="actions">
-          <a class="btn teal" target="_blank" href="${mapsUrl(r.paradas)}">Abrir no Google Maps</a>
+          ${mapsTrechos(r.paradas).map((t,i,a)=>`<a class="btn teal" target="_blank" href="${mapsUrl(t.pts,t.origem)}">${a.length>1?`Google Maps · paradas ${t.de}–${t.ate}`:'Abrir no Google Maps'}</a>`).join('')}
           ${r.paradas.some(id=>byId(S.pedidos,id).status==='rota')?`<button class="btn" onclick="iniciarEntregas()">Motorista saiu</button>`:''}
           <button class="btn ghost" onclick="desfazerRota()">Desfazer rota</button>
         </div>`
       :`<h2 style="margin-top:0">${prontos.length} pedidos prontos</h2>
         ${prontos.length?`<table>${prontos.map(p=>`<tr><td><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="sel" value="${p.id}" checked style="width:auto"> ${esc(p.cliente)}</label></td><td class="muted">${esc(p.end)}</td></tr>`).join('')}</table>
-        <div class="row" style="margin-top:14px"><div class="field"><label>Motorista</label><select id="mot">${S.motoristas.map(m=>`<option>${m}</option>`).join('')}</select></div></div>
+        <div class="row" style="margin-top:14px"><div class="field"><label>Motorista</label><select id="mot">${S.motoristas.map(m=>`<option>${esc(m)}</option>`).join('')}</select></div></div>
         <div class="actions"><button class="btn" onclick="criarRota()">Calcular rota</button></div>`
         :'<p class="empty">Separe pedidos para montar uma rota.</p>'}`}
     </div>
@@ -588,7 +597,22 @@ function criarRota(){
 }
 function iniciarEntregas(){S.rota.paradas.forEach(id=>{const p=byId(S.pedidos,id);if(p.status==='rota'){mudarStatus(p,'entrega');notificar(p,'Saiu para entrega')}});toast('Entregas iniciadas');go('entregas')}
 function desfazerRota(){S.rota.paradas.forEach(id=>{const p=byId(S.pedidos,id);if(['rota','entrega'].includes(p.status))mudarStatus(p,'separado')});S.rota=null;render()}
-function mapsUrl(ids){const pts=ids.map(id=>{const p=byId(S.pedidos,id);return `${p.lat},${p.lng}`});return `https://www.google.com/maps/dir/?api=1&origin=${BASE.lat},${BASE.lng}&destination=${pts[pts.length-1]}&waypoints=${pts.slice(0,-1).join('|')}&travelmode=driving`}
+// sem parada pendente (todas entregues ou com falha), a rota acaba e libera a montagem da próxima
+function fecharRotaSeConcluida(){
+  if(S.rota&&!S.rota.paradas.some(id=>['rota','entrega'].includes(byId(S.pedidos,id)?.status))){S.rota=null;return true}
+  return false;
+}
+// o Google Maps aceita até 9 paradas intermediárias por link: rotas maiores viram trechos de 10 paradas,
+// cada um saindo da última parada do anterior
+function mapsTrechos(ids){
+  const out=[];
+  for(let i=0;i<ids.length;i+=10){
+    const anterior=i?byId(S.pedidos,ids[i-1]):BASE;
+    out.push({origem:anterior,pts:ids.slice(i,i+10),de:i+1,ate:Math.min(i+10,ids.length)});
+  }
+  return out;
+}
+function mapsUrl(ids,origem=BASE){const pts=ids.map(id=>{const p=byId(S.pedidos,id);return `${p.lat},${p.lng}`});return `https://www.google.com/maps/dir/?api=1&origin=${origem.lat},${origem.lng}&destination=${pts[pts.length-1]}&waypoints=${pts.slice(0,-1).join('|')}&travelmode=driving`}
 function drawMap(){
   const svg=document.getElementById('map'); if(!svg)return;
   const ids=S.rota?S.rota.paradas:S.pedidos.filter(p=>p.status==='separado').map(p=>p.id);
@@ -623,7 +647,7 @@ function entregas(){
       </div>`}</div><span></span></li>`}).join('')}</ol>`:'<p class="empty">Nada em entrega agora. Monte uma rota e marque a saída do motorista.</p>'}
     </div>
     <div class="panel"><h2 style="margin-top:0">Histórico</h2>
-    ${hist.length?`<table class="hist">${hist.map(p=>`<tr><td>#${p.id}<br><span class="muted">${p.prev?p.prev.slice(8)+'/'+p.prev.slice(5,7):''}</span></td><td>${esc(p.cliente)}<br><span class="muted">${p.status==='entregue'?(p.comprovante?`recebido por ${esc(p.comprovante.recebedor||'—')}${p.comprovante.foto?' · foto':''}${p.comprovante.assinatura?' · assinatura':''}`:'sem comprovante'):(p.ocorrencia?esc(p.ocorrencia.motivo):'')}</span></td><td><span class="tag ${p.status}">${p.status}</span>${noPrazo(p)===false?'<br><span class="tag falha">atrasado</span>':''}</td><td class="nw" style="text-align:right"><button class="btn ghost sm" onclick="verRastreio(${p.id})">Rastreio</button>${p.pago?'':` <button class="btn ghost sm" onclick="cobrar(${p.id})">Pix</button>`}</td></tr>`).join('')}</table>`:'<p class="empty">Sem entregas concluídas.</p>'}
+    ${hist.length?`<table class="hist">${hist.map(p=>`<tr><td>#${p.id}<br><span class="muted">${p.prev?p.prev.slice(8)+'/'+p.prev.slice(5,7):''}</span></td><td>${esc(p.cliente)}<br><span class="muted">${p.status==='entregue'?(p.comprovante?`recebido por ${esc(p.comprovante.recebedor||'—')}${p.comprovante.foto?' · foto':''}${p.comprovante.assinatura?' · assinatura':''}`:'sem comprovante'):(p.ocorrencia?esc(p.ocorrencia.motivo):'')}</span></td><td><span class="tag ${p.status}">${p.status}</span>${noPrazo(p)===false?'<br><span class="tag falha">atrasado</span>':''}</td><td class="nw" style="text-align:right"><button class="btn ghost sm" onclick="verRastreio(${p.id})">Rastreio</button>${p.pago||p.status==='falha'?'':` <button class="btn ghost sm" onclick="cobrar(${p.id})">Pix</button>`}</td></tr>`).join('')}</table>`:'<p class="empty">Sem entregas concluídas.</p>'}
     </div>
   </div>`;
 }
@@ -669,7 +693,7 @@ async function confirmarEntrega(id){
   if(foto) p.comprovante.fotoData=foto;
   if(assin) p.comprovante.assinaturaData=assin;
   mudarStatus(p,'entregue',ts); p.motorista=S.rota?.motorista; notificar(p,'Entregue'); S.acao=null;
-  toast(`Pedido ${id} entregue`); render();
+  toast(fecharRotaSeConcluida()?`Pedido ${id} entregue. Rota concluída`:`Pedido ${id} entregue`); render();
 }
 function registrarOcorrencia(id){
   const p=byId(S.pedidos,id), m=document.getElementById('oc-m').value, d=document.getElementById('oc-d').value, o=document.getElementById('oc-o').value.trim();
@@ -682,7 +706,7 @@ function registrarOcorrencia(id){
     notificar(p,`Reagendado para ${d.slice(8)}/${d.slice(5,7)}`); toast(`Pedido ${id} reagendado`)
   }
   else{mudarStatus(p,'falha',ts);p.itens.forEach(i=>{byId(S.produtos,i.p).qtd+=i.q;mov(i.p,'entrada',i.q,`Devolução #${id}`)});notificar(p,'Entrega não realizada');toast(`Pedido ${id} devolvido ao estoque`)}
-  S.acao=null; render();
+  fecharRotaSeConcluida(); S.acao=null; render();
 }
 function cobrar(id){S.pixSel=id;go('pix')}
 function verRastreio(id){S.trackId=id;go('rastreio')}
@@ -712,9 +736,12 @@ function brcode(p){
   let s=tlv('00','01')+tlv('01','12')/* uso único: o valor é do pedido */+tlv('26',mai)+tlv('52','0000')+tlv('53','986')+tlv('54',total(p).toFixed(2))+tlv('58','BR')+tlv('59',norm(S.chave.nome).slice(0,25))+tlv('60',norm(S.chave.cidade).slice(0,15))+tlv('62',tlv('05',`FLX${p.id}`))+'6304';
   return s+crc16(s);
 }
+// o pedido cobrado sai sempre da lista de abertos: QR, código e seletor mostram o mesmo pedido
+const pixAbertos=()=>S.pedidos.filter(p=>!p.pago&&p.status!=='falha');
+const pixAtual=()=>{const a=pixAbertos();return a.find(p=>p.id===S.pixSel)||a[0]};
 function pix(){
-  const abertos=S.pedidos.filter(p=>!p.pago&&p.status!=='falha'), semChave=!String(S.chave.valor||'').trim();
-  const sel=semChave?null:byId(S.pedidos,S.pixSel)||abertos[0];
+  const abertos=pixAbertos(), semChave=!String(S.chave.valor||'').trim();
+  const sel=semChave?null:pixAtual();
   return `<h1>Cobranças Pix</h1><p class="sub">Um QR Code por pedido, com o valor já preenchido, no padrão BR Code do Banco Central. Abre em qualquer banco.</p>
   <div class="cols">
     <div class="panel"><h2 style="margin-top:0">Pedido</h2>
@@ -727,7 +754,7 @@ function pix(){
     <div class="panel">${sel?`<h2 style="margin-top:0">${brl(total(sel))} · #${sel.id}</h2><div class="qr" id="qr"></div><div class="code">${brcode(sel)}</div>`:`<p class="empty">${semChave?'Informe a chave Pix recebedora para gerar o QR Code.':'Nenhum pedido a receber.'}</p>`}</div>
   </div>`;
 }
-function drawQr(){const el=document.getElementById('qr');const sel=byId(S.pedidos,S.pixSel)||S.pedidos.filter(p=>!p.pago&&p.status!=='falha')[0];if(!el||!sel)return;el.innerHTML='';try{new QRCode(el,{text:brcode(sel),width:200,height:200,colorDark:'#1F3A5F',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}catch(e){el.textContent='QR indisponível (biblioteca não carregou). Use o código copia e cola.'}}
+function drawQr(){const el=document.getElementById('qr');const sel=pixAtual();if(!el||!sel)return;el.innerHTML='';try{new QRCode(el,{text:brcode(sel),width:200,height:200,colorDark:'#1F3A5F',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}catch(e){el.textContent='QR indisponível (biblioteca não carregou). Use o código copia e cola.'}}
 function copiarPix(id){
   const p=byId(S.pedidos,id); if(!p) return;
   const falha=()=>toast('Copie o código que está abaixo do QR');
@@ -742,7 +769,8 @@ function marcarPago(id){const p=byId(S.pedidos,id);if(!p.pago){p.pago=true;p.pag
    e todas as telas continuam funcionando no preenchimento manual.
    Sem backend próprio. Para hospedar fora, trocar por fetch('/api/claude') com a chave no servidor. */
 const temIA = ()=>typeof window.claude?.complete==='function';
-async function claude(prompt){
+// não pode se chamar "claude": uma função global com esse nome substitui o window.claude do runtime
+async function chamarIA(prompt){
   if(!temIA()) throw new Error('assistente indisponível');
   const r=await window.claude.complete(prompt);
   return typeof r==='string'?r:String(r??'');
@@ -762,10 +790,12 @@ function assistente(){
 async function perguntar(q){
   q=q.trim(); if(!q)return;
   S.chat.push({role:'user',content:q}); render();
-  const ctx={data:HOJE,base:BASE,produtos:S.produtos,pedidos:S.pedidos.map(p=>({...p,total:total(p)})),rota:S.rota};
+  // foto e assinatura (base64, dezenas de KB cada) ficam fora: só o que o assistente precisa para responder
+  const semImagem=({comprovante:c,...p})=>({...p,total:total(p),...(c&&{comprovante:{recebedor:c.recebedor,hora:c.hora,foto:c.foto,assinatura:c.assinatura}})});
+  const ctx={data:HOJE,base:BASE,produtos:S.produtos,pedidos:S.pedidos.map(semImagem),rota:S.rota};
   const sys=`Você é o assistente do Fluxo, sistema de logística de uma cooperativa em Frutal-MG. Responda em português, curto e direto, sem markdown, com números concretos. Dados atuais: ${JSON.stringify(ctx)}`;
   const hist=S.chat.slice(-8).map(m=>`${m.role==='user'?'Pergunta':'Resposta'}: ${m.content}`).join('\n');
-  try{const a=await claude(`${sys}\n\n${hist}\n\nResposta:`);S.chat.push({role:'assistant',content:a})}
+  try{const a=await chamarIA(`${sys}\n\n${hist}\n\nResposta:`);S.chat.push({role:'assistant',content:a})}
   catch(e){S.chat.push({role:'assistant',content:temIA()?'Não consegui responder agora. Pergunte de novo em instantes.':'O assistente não está conectado nesta cópia. Os números estão no Painel e em Gestão.'})}
   render();
 }
@@ -791,9 +821,10 @@ function validacao(){
 function gestao(){
   const ent=S.pedidos.filter(p=>p.status==='entregue'), fal=S.pedidos.filter(p=>p.status==='falha'), fin=ent.length+fal.length;
   const receita=ent.reduce((s,p)=>s+total(p),0), ticket=ent.length?receita/ent.length:0;
+  const dias=ultimos8(), receita8=ent.filter(p=>dataEntrega(p)>=dias[0]).reduce((s,p)=>s+total(p),0);
   const areceber=S.pedidos.filter(p=>!p.pago&&p.status!=='falha').reduce((s,p)=>s+total(p),0);
-  const vendidos={}; ent.forEach(p=>p.itens.forEach(i=>vendidos[i.p]=(vendidos[i.p]||0)+i.q));
-  const top=Object.entries(vendidos).map(([id,q])=>({p:byId(S.produtos,+id),q})).filter(x=>x.p).sort((a,b)=>b.q*b.p.preco-a.q*a.p.preco).slice(0,5);
+  const vendidos={}; ent.forEach(p=>p.itens.forEach(i=>{const v=vendidos[i.p]||(vendidos[i.p]={q:0,v:0});v.q+=i.q;v.v+=i.q*precoItem(i)}));
+  const top=Object.entries(vendidos).map(([id,x])=>({p:byId(S.produtos,+id),...x})).filter(x=>x.p).sort((a,b)=>b.v-a.v).slice(0,5);
   const cli={}; S.pedidos.forEach(p=>{const c=cli[p.cliente]||(cli[p.cliente]={n:0,v:0,tel:p.tel,ult:''});c.n++;if(p.status==='entregue')c.v+=total(p);if(p.criado>c.ult)c.ult=p.criado});
   const clientes=Object.entries(cli).sort((a,b)=>b[1].v-a[1].v);
   const porMot=S.motoristas.map(m=>({m,ent:ent.filter(p=>p.motorista===m).length,fal:fal.filter(p=>p.motorista===m).length}));
@@ -812,7 +843,7 @@ function gestao(){
     <div class="note" style="margin-top:4px">${MODO_NOTA()}Entregas das últimas 24h ainda sem pagamento só entram na conta quando o prazo termina. Pedidos registrados antes do registro de horários ficam de fora.</div>
   </div>
   <div class="kpis">
-    ${kpi(brl(receita),'Receita entregue','últimos 8 dias')}
+    ${kpi(brl(receita8),'Receita entregue',`últimos 8 dias · desde ${dias[0].slice(8)}/${dias[0].slice(5,7)}`)}
     ${kpi(brl(areceber),'A receber','pedidos sem Pix confirmado')}
     ${kpi(brl(ticket),'Ticket médio','por entrega')}
     ${kpi(fin?Math.round(ent.length/fin*100)+'%':'—','Entregas concluídas',`${ent.length} de ${fin} finalizadas`)}
@@ -826,7 +857,7 @@ function gestao(){
   <div class="cols">
     <div class="panel"><h2 style="margin-top:0">Receita por dia</h2><svg class="chart" id="chart" viewBox="0 0 560 220"></svg></div>
     <div class="panel"><h2 style="margin-top:0">Produtos mais vendidos</h2>
-      ${top.length?`<table>${top.map(x=>`<tr><td>${esc(x.p.nome)}</td><td class="nw muted">${x.q} un</td><td class="num">${brl(x.q*x.p.preco)}</td></tr>`).join('')}</table>`:'<p class="empty">Sem vendas concluídas.</p>'}</div>
+      ${top.length?`<table>${top.map(x=>`<tr><td>${esc(x.p.nome)}</td><td class="nw muted">${x.q} un</td><td class="num">${brl(x.v)}</td></tr>`).join('')}</table>`:'<p class="empty">Sem vendas concluídas.</p>'}</div>
   </div>
   <div class="cols" style="margin-top:22px">
     <div class="panel"><h2 style="margin-top:0">Clientes</h2>
@@ -897,10 +928,13 @@ function gestao(){
   </table></div>`;
 }
 function addBairro(){const n=document.getElementById('nb-n').value.trim(),t=+document.getElementById('nb-t').value;if(!n)return toast('Informe o bairro');S.bairros.push({n,taxa:t});toast('Bairro adicionado');render()}
+// receita conta no dia em que foi entregue, não no dia do pedido
+const dataEntrega=p=>(quandoUlt(p,'entregue')||p.comprovante?.hora||p.criado).slice(0,10);
+const ultimos8=()=>[...Array(8)].map((_,i)=>{const d=new Date(HOJE+'T12:00'); d.setDate(d.getDate()-7+i); return iso(d,10)});
 function drawChart(){
   const svg=document.getElementById('chart'); if(!svg)return;
-  const dias=[...Array(8)].map((_,i)=>{const d=new Date(HOJE+'T12:00'); d.setDate(d.getDate()-7+i); return iso(d,10)});
-  const vals=dias.map(d=>S.pedidos.filter(p=>p.status==='entregue'&&p.criado.startsWith(d)).reduce((s,p)=>s+total(p),0));
+  const dias=ultimos8();
+  const vals=dias.map(d=>S.pedidos.filter(p=>p.status==='entregue'&&dataEntrega(p)===d).reduce((s,p)=>s+total(p),0));
   const max=Math.max(...vals,1), W=560,H=220,pl=44,pb=30,bw=(W-pl-10)/dias.length;
   let h=`<line x1="${pl}" y1="${H-pb}" x2="${W}" y2="${H-pb}" stroke="#E3DFD4"/>`;
   [0,.5,1].forEach(f=>{const y=H-pb-f*(H-pb-20);h+=`<text x="${pl-6}" y="${y+4}" font-size="10" fill="#7A8797" text-anchor="end">${Math.round(max*f)}</text><line x1="${pl}" y1="${y}" x2="${W}" y2="${y}" stroke="#EEEBE3"/>`});
