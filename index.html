@@ -274,7 +274,9 @@ let HOJE = HOJE_DEMO;           // no uso real vira a data de hoje (atualizada e
 const MODO_NOTA = ()=>MODO==='demo'?'Na demonstração, os números vêm dos pedidos de exemplo. ':'';
 // toISOString devolve UTC: em Frutal isso registraria a entrega 3h adiantada. iso() mantém o horário local.
 const iso = (d,n=16)=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,n);
-const agora = ()=>iso(new Date());
+// Na demonstração o dia é fixo (10/09) e só a hora é real: o que acontece durante a apresentação cai no mesmo dia
+// dos pedidos de exemplo. Nunca antes das 10:00, para não ficar antes dos eventos de exemplo da manhã.
+const agora = ()=>{const r=iso(new Date()); if(MODO!=='demo') return r; const h=r.slice(11,16); return `${HOJE_DEMO}T${h<'10:00'?'10:00':h}`};
 const byId = (arr,id)=>arr.find(x=>x.id===id);
 // o preço fica gravado no item quando o pedido é criado: editar ou remover o produto não muda pedidos antigos nem um Pix já enviado
 const precoItem = i=>i.preco??byId(S.produtos,i.p)?.preco??0;
@@ -907,7 +909,7 @@ function validacao(){
   const ini=new Date(HOJE+'T12:00'); ini.setDate(ini.getDate()-6); const desde=iso(ini,10);
   const cont=(S.movimentos||[]).filter(m=>m.tipo==='ajuste'&&m.dif!=null&&m.ts.slice(0,10)>=desde), div=cont.filter(m=>m.dif);
   // 3. pagos em até 24h após a entrega; quem ainda está dentro das 24h sem pagar só entra quando o prazo fecha
-  const agoraMs=Date.now();
+  const agoraMs=new Date(agora()).getTime(); // relógio da demonstração quando em demo
   const elig=S.pedidos.map(p=>({p,e:quandoUlt(p,'entregue')||p.comprovante?.hora})).filter(({p,e})=>p.status==='entregue'&&e&&(p.pagoEm||!p.pago)&&(p.pagoEm||agoraMs-new Date(e)>=864e5));
   const em24=elig.filter(({p,e})=>p.pagoEm&&minEntre(e,p.pagoEm)<=1440).length;
   return {saidaMedia:saidas.length?saidas.reduce((s,m)=>s+m,0)/saidas.length:null,nSaidas:saidas.length,
