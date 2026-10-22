@@ -6,6 +6,8 @@ Reúne numa só tela pedidos, estoque, rotas de entrega e cobrança por Pix, pen
 
 O sistema é um único arquivo, `index.html`, que roda direto no navegador, sem instalação.
 
+**Acesse:** [jmqz.github.io/fluxo](https://jmqz.github.io/fluxo/)
+
 ## Apresentação
 
 [`Apresentacao-Fluxo.pdf`](Apresentacao-Fluxo.pdf) apresenta o projeto pelos quatro workshops: Ideação, MVP, Prototipação e Pitch.

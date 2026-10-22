@@ -425,7 +425,7 @@ function pedidos(){
       <h2 style="margin-top:0">Novo pedido</h2>
       <div class="field"><label>Mensagem do WhatsApp (opcional)</label>
         <textarea id="wamsg" rows="3" placeholder="Ex.: Oi, sou a Ana da Lanchonete Central, quero 5 queijos e 2 potes de mel pra amanhã, entrega na Rua Amazonas 45"></textarea>
-        <div class="actions"><button class="btn teal sm" onclick="interpretar()" ${temIA()?'':'disabled'}>Preencher com IA</button><span class="muted" id="wastatus">${temIA()?'':'Disponível quando o assistente estiver conectado.'}</span></div>
+        <div class="actions"><button class="btn teal sm" onclick="interpretar()">${temIA()?'Preencher com IA':'Preencher pela mensagem'}</button><span class="muted" id="wastatus"></span></div>
       </div>
       <div class="row" style="margin-top:12px">
         <div class="field"><label>Cliente</label><input id="f-cli"></div>
@@ -498,13 +498,61 @@ async function interpretar(){
   const prompt=`Você recebe uma mensagem de cliente pedindo produtos. Catálogo (id: nome): ${S.produtos.map(p=>`${p.id}: ${p.nome}`).join('; ')}.
 Extraia e responda SOMENTE um JSON, sem markdown: {"cliente":string,"telefone":string ou "","endereco":string,"itens":[{"p":id,"q":inteiro}]}. Mapeie os produtos para o id mais próximo do catálogo.
 Mensagem: """${msg}"""`;
-  try{
-    const data=await chamarIA(prompt);
-    const j=JSON.parse(data.replace(/```json|```/g,'').trim());
-    document.getElementById('f-cli').value=j.cliente||''; document.getElementById('f-tel').value=(j.telefone||'').replace(/\D/g,''); document.getElementById('f-end').value=j.endereco||'';
-    document.getElementById('itens').innerHTML=''; (j.itens||[]).forEach(i=>addItem(i.p,i.q)); if(!j.itens?.length) addItem();
-    st.textContent='Campos preenchidos, confira antes de salvar.';
-  }catch(e){ st.textContent=temIA()?'Não deu para ler a mensagem. Preencha os campos manualmente.':'O assistente não está conectado aqui. Preencha os campos manualmente.'; }
+  let j=null, fonte='IA';
+  if(temIA()){ try{ j=JSON.parse((await chamarIA(prompt)).replace(/```json|```/g,'').trim()) }catch(e){} }
+  if(!j){ j=lerMensagem(msg); fonte='regras' } // sem IA (ou se ela falhar), o leitor por regras cobre as mensagens comuns
+  // cada leitura começa do zero: o que a mensagem não traz volta ao padrão, não fica o valor da mensagem anterior
+  const x=extrasMensagem(msg), set=(id,v)=>{const e=document.getElementById(id); if(e) e.value=v};
+  set('f-cli',j.cliente||''); set('f-tel',(j.telefone||'').replace(/\D/g,'')); set('f-end',j.endereco||'');
+  set('f-bairro',x.bairro||S.bairros[0]?.n||''); set('f-prev',x.prev||HOJE); set('f-janela',x.janela||'Manhã');
+  document.getElementById('itens').innerHTML=''; (j.itens||[]).forEach(i=>addItem(i.p,i.q)); if(!j.itens?.length) addItem();
+  const achou=[j.cliente&&'cliente',j.telefone&&'telefone',j.endereco&&'endereço',j.itens?.length&&`${j.itens.length} ${j.itens.length===1?'item':'itens'}`,x.prev&&'data',x.janela&&'janela'].filter(Boolean);
+  st.textContent=achou.length?`${fonte==='IA'?'Lido pela IA':'Lido pelas regras do Fluxo'}: ${achou.join(', ')}. Confira antes de salvar.`:'Não encontrei dados na mensagem. Preencha os campos manualmente.';
+}
+
+/* Leitor de mensagens sem IA: procura no texto o catálogo, as quantidades, o endereço e o telefone.
+   Cobre o pedido típico ("sou a Ana da Lanchonete Central, quero 5 queijos e 2 potes de mel, entrega na Rua Amazonas 45"). */
+const semAcento=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+const NUM_EXTENSO={um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,dez:10,onze:11,doze:12,quinze:15,vinte:20,trinta:30};
+function lerMensagem(msg){
+  const t=semAcento(msg);
+  // cliente: "sou a Ana da Lanchonete Central", "aqui é da Padaria X", "meu nome é Ana"
+  const mc=msg.match(/(?:\bsou (?:a |o )?|aqui (?:é|e) (?:a |o |da |do )?|meu nome (?:é|e) )([^,.;!?\n]+?)(?=\s*(?:[,.;!?\n]|\b(?:quero|queria|gostaria|preciso|vou querer|pode|manda)\b|$))/i);
+  // telefone: (34) 99911-0001, 34999110001, +55 34 9 9911 0001
+  const mt=msg.match(/(?:\+?55[\s-]?)?\(?\b\d{2}\)?[\s-]?9?[\s.-]?\d{4}[\s.-]?\d{4}\b/);
+  let tel=mt?mt[0].replace(/\D/g,''):''; if(tel.length===10||tel.length===11) tel='55'+tel;
+  // endereço: começa num tipo de logradouro e vai até a vírgula, ponto ou fim (o número vem junto)
+  const me=msg.match(/\b((?:rua|r\.|avenida|av\.?|travessa|tv\.|alameda|pra[çc]a|rodovia|estrada|s[íi]tio|fazenda|ch[áa]cara)\s+[^,.;!?\n]+?(?:,\s*(?:n[º°o.]?\s*)?\d+[a-z]?)?)(?=\s*(?:[.;!?\n]|,(?!\s*(?:n[º°o.]?\s*)?\d)|\b(?:pra|para|amanh|hoje|bairro)\b|$))/i);
+  // itens: "5 queijos", "2 potes de mel", "uma dúzia de ovos" (número até 3 palavras antes do produto)
+  const itens=[];
+  for(const p of S.produtos){
+    const chave=semAcento(p.nome).split(/\s+/)[0].replace(/[^a-z]/g,'');
+    if(chave.length<3) continue;
+    const raiz=chave.replace(/s$/,'');
+    // as palavras do meio não podem ser outro número nem "e": em "10 rapaduras e um mel" o mel é 1, não 10
+    const nums=Object.keys(NUM_EXTENSO).join('|');
+    const re=new RegExp(`\\b(\\d+|${nums})\\s+(?:(?!(?:e|${nums})\\b)[a-z]+\\s+){0,3}?${raiz}(?:s|es)?\\b`);
+    const m=t.match(re);
+    if(m) itens.push({p:p.id,q:+m[1]||NUM_EXTENSO[m[1]]||1});
+    else if(new RegExp(`\\b${raiz}(?:s|es)?\\b`).test(t)) itens.push({p:p.id,q:1});
+  }
+  let cliente=mc?mc[1].trim():'';
+  if(cliente&&cliente===cliente.toLowerCase()) cliente=cliente.replace(/(^|\s)(\p{L})/gu,(_,a,b)=>a+b.toUpperCase()).replace(/ (Da|De|Do|Das|Dos|E) /g,s=>s.toLowerCase());
+  // o bairro no fim do endereço vai para o campo Bairro (extrasMensagem), não fica repetido no endereço
+  let endereco=me?me[1].trim():'';
+  for(const b of S.bairros){const r=new RegExp(`[\\s,-]+${semAcento(b.n)}$`,'i'); if(r.test(semAcento(endereco))) endereco=endereco.slice(0,endereco.length-semAcento(endereco).match(r)[0].length)}
+  return {cliente,telefone:tel,endereco,itens};
+}
+// data, janela e bairro: lidos sempre pelas regras, também quando a IA preenche o resto
+function extrasMensagem(msg){
+  const t=semAcento(msg), d=new Date(HOJE+'T12:00');
+  let prev='';
+  if(/\bdepois de amanha\b/.test(t)){d.setDate(d.getDate()+2);prev=iso(d,10)}
+  else if(/\bamanha\b/.test(t)){d.setDate(d.getDate()+1);prev=iso(d,10)}
+  else if(/\bhoje\b/.test(t)) prev=HOJE;
+  const janela=/\b(?:a|de|pela|na)\s+tarde\b|\btardinha\b/.test(t)?'Tarde':/\b(?:de|pela|na|cedo)\s+manha\b|\bcedinho\b/.test(t)?'Manhã':'';
+  const bairro=S.bairros.find(b=>t.includes(semAcento(b.n)))?.n||'';
+  return {prev,janela,bairro};
 }
 
 /* ---------- estoque ---------- */
@@ -613,6 +661,12 @@ function mapsTrechos(ids){
   return out;
 }
 function mapsUrl(ids,origem=BASE){const pts=ids.map(id=>{const p=byId(S.pedidos,id);return `${p.lat},${p.lng}`});return `https://www.google.com/maps/dir/?api=1&origin=${origem.lat},${origem.lng}&destination=${pts[pts.length-1]}&waypoints=${pts.slice(0,-1).join('|')}&travelmode=driving`}
+// nome do cliente ao lado do ponto: até 22 letras cortando na palavra, e do lado esquerdo quando o ponto está perto da borda direita
+function rotulo(x,y,nome){
+  let n=nome; if(n.length>22){n=n.slice(0,22).replace(/\s+\S*$/,'')+'…'}
+  const esq=x>400;
+  return `<text x="${esq?x-15:x+15}" y="${y+4}" font-size="12" fill="#1F3A5F" text-anchor="${esq?'end':'start'}">${esc(n)}</text>`;
+}
 function drawMap(){
   const svg=document.getElementById('map'); if(!svg)return;
   const ids=S.rota?S.rota.paradas:S.pedidos.filter(p=>p.status==='separado').map(p=>p.id);
@@ -624,7 +678,7 @@ function drawMap(){
   if(S.rota) h+=`<polyline points="${pts.map(p=>`${X(p.lng)},${Y(p.lat)}`).join(' ')}" fill="none" stroke="#4A9A8F" stroke-width="3" stroke-dasharray="6 5"/>`;
   pts.forEach((p,i)=>{const x=X(p.lng),y=Y(p.lat);
     h+= i===0?`<rect x="${x-8}" y="${y-8}" width="16" height="16" fill="#C9A84C"/><text x="${x+12}" y="${y+4}" font-size="12" fill="#1F3A5F">Base</text>`
-      :`<circle cx="${x}" cy="${y}" r="11" fill="${p.status==='entregue'?'#4A9A8F':p.status==='falha'?'#8F7226':'#1F3A5F'}"/><text x="${x}" y="${y+4}" font-size="11" fill="#fff" text-anchor="middle">${S.rota?i:''}</text><text x="${x+15}" y="${y+4}" font-size="12" fill="#1F3A5F">${esc(p.cliente.split(' ').slice(0,2).join(' '))}</text>`});
+      :`<circle cx="${x}" cy="${y}" r="11" fill="${p.status==='entregue'?'#4A9A8F':p.status==='falha'?'#8F7226':'#1F3A5F'}"/><text x="${x}" y="${y+4}" font-size="11" fill="#fff" text-anchor="middle">${S.rota?i:''}</text>${rotulo(x,y,p.cliente)}`});
   svg.innerHTML=h;
 }
 
@@ -765,8 +819,8 @@ function marcarPago(id){const p=byId(S.pedidos,id);if(!p.pago){p.pago=true;p.pag
 
 /* ---------- assistente ---------- */
 /* O navegador não pode chamar api.anthropic.com direto: não há chave (e não deve haver, num HTML público)
-   e o CORS bloqueia a requisição. Usamos o runtime do Claude quando ele existe; sem ele a IA fica desligada
-   e todas as telas continuam funcionando no preenchimento manual.
+   e o CORS bloqueia a requisição. Usamos o runtime do Claude quando ele existe; sem ele o assistente responde
+   às perguntas mais comuns por respostaLocal() e o pedido é lido por lerMensagem().
    Sem backend próprio. Para hospedar fora, trocar por fetch('/api/claude') com a chave no servidor. */
 const temIA = ()=>typeof window.claude?.complete==='function';
 // não pode se chamar "claude": uma função global com esse nome substitui o window.claude do runtime
@@ -781,9 +835,9 @@ function assistente(){
   return `<h1>Assistente</h1><p class="sub">Pergunte sobre a operação em linguagem natural. Ele lê os dados desta tela e responde em segundos.</p>
   <div class="panel chat">
     <div class="msgs" id="msgs">${S.chat.length?S.chat.map(m=>`<div class="msg ${m.role==='user'?'u':'a'}">${esc(m.content)}</div>`).join(''):'<p class="empty">Nenhuma pergunta ainda. Comece por uma das sugestões.</p>'}</div>
-    <div class="chips">${sug.map(s=>`<button class="chip" onclick="perguntar(${esc(JSON.stringify(s))})" ${on?'':'disabled'}>${esc(s)}</button>`).join('')}</div>
-    <div class="compose"><input id="q" placeholder="Escreva sua pergunta" ${on?'':'disabled'} onkeydown="if(event.key==='Enter')perguntar(this.value)"><button class="btn" onclick="perguntar(document.getElementById('q').value)" ${on?'':'disabled'}>Enviar</button></div>
-    ${on?'':'<div class="note">O assistente roda no runtime do Claude e não está disponível nesta cópia. Os mesmos números estão no Painel e em Gestão.</div>'}
+    <div class="chips">${sug.map(s=>`<button class="chip" onclick="perguntar(${esc(JSON.stringify(s))})">${esc(s)}</button>`).join('')}</div>
+    <div class="compose"><input id="q" placeholder="Escreva sua pergunta" onkeydown="if(event.key==='Enter')perguntar(this.value)"><button class="btn" onclick="perguntar(document.getElementById('q').value)">Enviar</button></div>
+    ${on?'':'<div class="note">Sem a IA conectada, o assistente responde pelas regras do Fluxo: pedidos que faltam sair, reposição, valores a receber, atrasos, vendas e distância das entregas.</div>'}
   </div>
 `;
 }
@@ -795,9 +849,51 @@ async function perguntar(q){
   const ctx={data:HOJE,base:BASE,produtos:S.produtos,pedidos:S.pedidos.map(semImagem),rota:S.rota};
   const sys=`Você é o assistente do Fluxo, sistema de logística de uma cooperativa em Frutal-MG. Responda em português, curto e direto, sem markdown, com números concretos. Dados atuais: ${JSON.stringify(ctx)}`;
   const hist=S.chat.slice(-8).map(m=>`${m.role==='user'?'Pergunta':'Resposta'}: ${m.content}`).join('\n');
-  try{const a=await chamarIA(`${sys}\n\n${hist}\n\nResposta:`);S.chat.push({role:'assistant',content:a})}
-  catch(e){S.chat.push({role:'assistant',content:temIA()?'Não consegui responder agora. Pergunte de novo em instantes.':'O assistente não está conectado nesta cópia. Os números estão no Painel e em Gestão.'})}
+  let a=null;
+  if(temIA()){ try{a=await chamarIA(`${sys}\n\n${hist}\n\nResposta:`)}catch(e){} }
+  S.chat.push({role:'assistant',content:a||respostaLocal(q)}); // sem IA (ou se ela falhar), responde pelas regras
+  const inp=document.getElementById('q'); if(inp) inp.value='';
   render();
+}
+// Respostas sem IA: reconhece o assunto da pergunta por palavras-chave e calcula com os mesmos dados do Painel e da Gestão
+function respostaLocal(q){
+  const t=semAcento(q), km=v=>v.toFixed(1).replace('.',','), dm=ts=>`${ts.slice(8,10)}/${ts.slice(5,7)}`;
+  const lista=xs=>xs.length<=1?xs.join(''):xs.slice(0,-1).join(', ')+' e '+xs.at(-1);
+  if(/longe|distan|perto|\bkm\b/.test(t)){
+    const ent=S.pedidos.filter(p=>p.status==='entregue').map(p=>({p,d:dist(BASE,p)})).sort((a,b)=>b.d-a.d);
+    if(!ent.length) return 'Ainda não há entregas concluídas.';
+    const {p,d}=ent[0];
+    return `A entrega mais longe foi para ${p.cliente} (${p.end}), a ${km(d)} km da base, em ${dm(dataEntrega(p))}. A média das ${ent.length} entregas é ${km(ent.reduce((s,x)=>s+x.d,0)/ent.length)} km.`;
+  }
+  if(/atras|prazo|pontual/.test(t)){
+    const vencidos=S.pedidos.filter(p=>['novo','separado','rota','entrega'].includes(p.status)&&p.prev&&p.prev<HOJE);
+    const comPrazo=S.pedidos.filter(p=>noPrazo(p)!==null), late=comPrazo.filter(p=>noPrazo(p)===false);
+    return `${vencidos.length?`${vencidos.length} ${vencidos.length===1?'pedido está':'pedidos estão'} com a data prevista vencida: ${lista(vencidos.map(p=>`${p.cliente} (#${p.id}, previsto ${dm(p.prev)})`))}.`:'Nenhum pedido em aberto está com a data prevista vencida.'} Das ${comPrazo.length} entregas concluídas com data prevista, ${late.length} ${late.length===1?'chegou':'chegaram'} depois do prazo${late.length?`: ${lista(late.map(p=>p.cliente))}`:''}.`;
+  }
+  if(/repor|reposi|estoque|acaband|minimo/.test(t)){
+    if(!S.produtos.length) return 'Nenhum produto cadastrado ainda.';
+    const b=S.produtos.filter(p=>p.qtd<=p.min);
+    return b.length?`Precisa repor ${b.length===1?'1 produto':`${b.length} produtos`}: ${lista(b.map(p=>`${p.nome} (${p.qtd} un, mínimo ${p.min})`))}.`:'Nenhum produto está no mínimo.';
+  }
+  if(/receber|devend|\bdeve|pagar|pagou|pagamento|\bpix\b|cobr/.test(t)){
+    const ab=pixAbertos(); if(!ab.length) return 'Nada a receber: todos os pedidos estão pagos.';
+    const por={}; ab.forEach(p=>por[p.cliente]=(por[p.cliente]||0)+total(p));
+    return `${brl(ab.reduce((s,p)=>s+total(p),0))} a receber de ${ab.length} ${ab.length===1?'pedido':'pedidos'}: ${lista(Object.entries(por).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`${c} (${brl(v)})`))}.`;
+  }
+  if(/vend|fatur|receita|ganh/.test(t)){
+    const ent=S.pedidos.filter(p=>p.status==='entregue'); if(!ent.length) return 'Ainda não há vendas entregues.';
+    const soma=ent.reduce((s,p)=>s+total(p),0), v={}; ent.forEach(p=>p.itens.forEach(i=>v[i.p]=(v[i.p]||0)+i.q*precoItem(i)));
+    const [id,val]=Object.entries(v).sort((a,b)=>b[1]-a[1])[0];
+    return `Foram ${ent.length} entregas, somando ${brl(soma)} (ticket médio de ${brl(soma/ent.length)}). O produto que mais vendeu foi ${byId(S.produtos,+id)?.nome||'—'}, com ${brl(val)}.`;
+  }
+  if(/sair|falt|pendent|aberto|pedido|hoje|rota|entreg/.test(t)){
+    const nome={novo:'para separar',separado:'separados, esperando rota',rota:'na rota, esperando o motorista sair',entrega:'já saíram e estão em entrega'};
+    const grupos=['novo','separado','rota','entrega'].map(s=>[s,S.pedidos.filter(p=>p.status===s&&(!p.prev||p.prev<=HOJE))]).filter(([,ps])=>ps.length);
+    if(!grupos.length) return 'Nenhum pedido pendente para hoje.';
+    const falta=grupos.filter(([s])=>s!=='entrega').reduce((n,[,ps])=>n+ps.length,0);
+    return `${falta?`${falta} ${falta===1?'pedido falta':'pedidos faltam'} sair hoje.`:'Todos os pedidos de hoje já saíram.'} ${grupos.map(([s,ps])=>`${ps.length} ${nome[s]}: ${lista(ps.map(p=>p.cliente))}.`).join(' ')}`;
+  }
+  return 'Sem a IA conectada, respondo sobre pedidos que faltam sair, reposição de estoque, valores a receber, atrasos, vendas e distância das entregas. Tente uma das sugestões abaixo.';
 }
 
 /* ---------- gestão ---------- */
@@ -910,10 +1006,10 @@ function gestao(){
   <h2>Roadmap</h2>
   <div class="panel"><table class="roadmap tg"><tr><th>Função</th><th>Status</th><th>O que falta</th></tr>
     ${[
-      ['Pedido por WhatsApp interpretado por IA','ok','Roda no runtime do Claude; hospedado fora dele, precisa de um backend com a chave da API'],
+      ['Pedido por WhatsApp interpretado por IA','ok','Usa a IA no runtime do Claude; fora dele, um leitor por regras cobre as mensagens comuns. IA fora do Claude precisa de backend com a chave da API'],
       ['Roteirização e abertura no Google Maps','ok','—'],
       ['Pix dinâmico por pedido (BR Code)','ok','—'],
-      ['Assistente em linguagem natural','ok','Mesmo backend do item acima'],
+      ['Assistente em linguagem natural','ok','Sem a IA, responde às perguntas mais comuns pelas regras; perguntas livres precisam do mesmo backend'],
       ['Comprovante de entrega (foto, assinatura, recebedor)','ok','Foto reduzida para 720 px; armazenamento em nuvem ainda pendente'],
       ['Ocorrências com motivo e reagendamento','ok','Regras automáticas de nova tentativa'],
       ['Página de rastreio para o cliente','demo','Publicar no domínio e gerar link curto'],
