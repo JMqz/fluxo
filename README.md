@@ -14,4 +14,4 @@ O sistema é um único arquivo, `index.html`, que roda direto no navegador, sem 
 
 ## Apresentação a investidores
 
-[`investidores.html`](investidores.html) apresenta o Fluxo a investidores: problema, cada função do sistema, os indicadores da hipótese, roadmap e próximos passos. Online em [jmqz.github.io/fluxo/investidores.html](https://jmqz.github.io/fluxo/investidores.html).
+[`investidores.html`](investidores.html) apresenta o Fluxo a investidores: problema, cada função do sistema, os indicadores da hipótese, roadmap e próximos passos. Online em [jmqz.github.io/fluxo/investidores.html](https://jmqz.github.io/fluxo/investidores.html). Versão em PDF para apresentar: [`Apresentacao-Investidores.pdf`](Apresentacao-Investidores.pdf).
