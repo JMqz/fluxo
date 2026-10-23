@@ -11,3 +11,7 @@ O sistema é um único arquivo, `index.html`, que roda direto no navegador, sem 
 ## Apresentação
 
 [`Apresentacao-Fluxo.pdf`](Apresentacao-Fluxo.pdf) apresenta o projeto pelos quatro workshops: Ideação, MVP, Prototipação e Pitch.
+
+## Apresentação a investidores
+
+[`investidores.html`](investidores.html) apresenta o Fluxo a investidores: problema, cada função do sistema, os indicadores da hipótese, roadmap e próximos passos. Online em [jmqz.github.io/fluxo/investidores.html](https://jmqz.github.io/fluxo/investidores.html).
